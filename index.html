@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bet Evaluation Tool</title>
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js/dist/tesseract.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            padding: 10px;
+            background-color: #f4f4f4;
+        }
+        h1 {
+            text-align: center;
+        }
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            text-align: center;
+        }
+        .paste-area {
+            border: 2px dashed #ccc;
+            border-radius: 5px;
+            padding: 20px;
+            background-color: #fff;
+            cursor: pointer;
+            margin-bottom: 20px;
+        }
+        .paste-area img {
+            max-width: 100%;
+            margin-top: 10px;
+        }
+        button {
+            padding: 10px 15px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+        .result {
+            margin-top: 20px;
+            padding: 10px;
+            text-align: center;
+            background-color: #e0f7fa;
+        }
+        .result.good {
+            background-color: #c8e6c9;
+        }
+        .result.bad {
+            background-color: #ffebee;
+        }
+        .loading {
+            color: #ff9800;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Bet Evaluation Tool</h1>
+        <div id="paste-area" class="paste-area" contenteditable="true">
+            <p>Paste an image here</p>
+        </div>
+        <button onclick="processPastedImage()">Evaluate Bet</button>
+        <div id="loading" class="loading" style="display: none;">Processing image, please wait...</div>
+        <div id="result" class="result"></div>
+    </div>
+    <script>
+        function processPastedImage() {
+            const pasteArea = document.getElementById('paste-area');
+            const resultElement = document.getElementById('result');
+            const loadingElement = document.getElementById('loading');
+
+            resultElement.innerHTML = '';
+            loadingElement.style.display = 'none';
+
+            // Find the pasted image inside the paste area
+            const img = pasteArea.querySelector('img');
+            if (!img) {
+                alert('Please paste an image into the area above!');
+                return;
+            }
+
+            const imageSrc = img.src;
+            loadingElement.style.display = 'block';
+
+            Tesseract.recognize(
+                imageSrc,
+                'eng',
+                { logger: info => console.log(info) }
+            ).then(({ data: { text } }) => {
+                loadingElement.style.display = 'none';
+                console.log("OCR Raw Output:", text); // Log raw OCR output for debugging
+                parseOdds(text);
+            }).catch(error => {
+                loadingElement.style.display = 'none';
+                resultElement.innerHTML = 'Error processing image. Please try again.';
+                console.error(error);
+            });
+        }
+
+        function parseOdds(text) {
+            const resultElement = document.getElementById('result');
+
+            // Split text into lines
+            const lines = text.split('\n');
+            const odds = [];
+            let startProcessing = false; // Flag to process only lines under "Comparison"
+
+            // Helper function to fix common OCR errors
+            function fixOcrErrors(value) {
+                if (value === 10 || value === -10) {
+                    console.log("Fixing possible OCR error: Detected '10' or '-10', correcting to '110' or '-110'");
+                    return value < 0 ? -110 : 110; // Adjust negative or positive 10
+                }
+                return value;
+            }
+
+            // Step 1: Always capture the first valid odd (original odd)
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i];
+
+                // Clean the line thoroughly
+                const cleanLine = line.replace(/[^-+\d\s]/g, ''); // Remove non-numeric symbols like ']'
+                const match = cleanLine.match(/-?\d{2,3}/); // Match first valid odd (e.g., -110, 150)
+                if (match) {
+                    let value = parseInt(match[0], 10);
+                    value = fixOcrErrors(value); // Fix any OCR misreads
+                    odds.push(value); // Add the first valid odd
+                    console.log("Captured Original Odds:", odds[0]);
+                    break; // Stop after capturing the first odd
+                }
+            }
+
+            // Step 2: Process lines under "Comparison" for additional odds
+            lines.forEach((line) => {
+                if (line.toLowerCase().includes('comparison')) {
+                    startProcessing = true;
+                    return; // Skip this line
+                }
+
+                if (!startProcessing) {
+                    return; // Skip lines until "Comparison" section
+                }
+
+                // Clean the line thoroughly
+                const cleanLine = line.replace(/[^-+\d\s]/g, ''); // Remove non-numeric symbols
+                const match = cleanLine.match(/-?\d{2,3}/g); // Match all valid odds
+                if (match) {
+                    match.forEach(value => {
+                        let num = parseInt(value, 10);
+                        num = fixOcrErrors(num); // Fix any OCR misreads
+                        if (num >= -2000 && num <= 2000) { // Ensure valid odds range
+                            odds.push(num); // Add all valid odds (including duplicates)
+                        }
+                    });
+                }
+            });
+
+            console.log("Filtered Odds (Including Comparison Odds):", odds); // Log odds for debugging
+
+            if (odds.length < 2) {
+                resultElement.innerHTML = 'No valid odds found in the image.';
+                return;
+            }
+
+            // Separate original odds and comparisons
+            const originalOdds = Math.abs(odds[0]); // Absolute value of the original odds
+            const comparisons = odds.slice(1).map(Math.abs); // Convert to absolute values
+
+            // Define the bad range using absolute values
+            const badLower = originalOdds - 15;
+            const badUpper = originalOdds + 15;
+
+            let goodComparisons = 0;
+            let badComparisons = 0;
+
+            // Evaluate each comparison (count duplicates as separate comparisons)
+            comparisons.forEach(comparison => {
+                if (comparison < badLower || comparison > badUpper) {
+                    goodComparisons++;
+                } else {
+                    badComparisons++;
+                }
+            });
+
+            console.log("Comparison Analysis: Good =", goodComparisons, "Bad =", badComparisons);
+
+            // Determine the result
+            if (goodComparisons > badComparisons) {
+                resultElement.textContent = `This is a GOOD bet! Good: ${goodComparisons}, Bad: ${badComparisons}`;
+                resultElement.className = 'result good';
+            } else {
+                resultElement.textContent = `This is a BAD bet! Good: ${goodComparisons}, Bad: ${badComparisons}`;
+                resultElement.className = 'result bad';
+            }
+        }
+
+        // Handle paste event for the paste area
+        document.getElementById('paste-area').addEventListener('paste', (e) => {
+            const clipboardItems = e.clipboardData.items;
+            for (let i = 0; i < clipboardItems.length; i++) {
+                const item = clipboardItems[i];
+                if (item.type.startsWith('image/')) {
+                    const blob = item.getAsFile();
+                    const reader = new FileReader();
+
+                    reader.onload = (event) => {
+                        const pasteArea = document.getElementById('paste-area');
+                        pasteArea.innerHTML = `<img src="${event.target.result}" alt="Pasted Image">`;
+                    };
+
+                    reader.readAsDataURL(blob);
+                }
+            }
+
+            e.preventDefault();
+        });
+    </script>
+</body>
+</html>
