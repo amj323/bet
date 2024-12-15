@@ -111,9 +111,9 @@
 
             // Helper function to fix common OCR errors
             function fixOcrErrors(value) {
-                if (value === 10 || value === -10) {
-                    console.log("Fixing possible OCR error: Detected '10' or '-10', correcting to '110' or '-110'");
-                    return value < 0 ? -110 : 110; // Adjust negative or positive 10
+                if (Math.abs(value) >= 10 && Math.abs(value) <= 19) {
+                    console.log(`Fixing OCR error: '${value}' detected, correcting to '${value < 0 ? value - 100 : value + 100}'`);
+                    return value < 0 ? value - 100 : value + 100;
                 }
                 return value;
             }
